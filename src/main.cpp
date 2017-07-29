@@ -132,6 +132,15 @@ vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x
 
 }
 
+template <typename T>
+std::ostream& operator<< (std::ostream& out, const std::vector<T>& v) {
+  if ( !v.empty() ) {
+    out << '[';
+    std::copy (v.begin(), v.end(), std::ostream_iterator<T>(out, ", "));
+    out << "\b\b]";
+  }
+  return out;
+}
 
 
 tk::spline sx;
@@ -237,7 +246,7 @@ void guard(std::vector<double> &v, double a_max=8, double v_max=15, double dt=0.
 }
 
 
-vector<double> calc_cost_vec(std::vector<double> v, double a_max=8, double v_max=15, double dt=0.02)
+vector<double> calc_cost_vec(std::vector<double> v, double a_max=9.9, double v_max=22, double dt=0.02)
 {
   double a_cost = 0;
   double v_cost = 0;
@@ -271,7 +280,7 @@ vector<double> calc_cost_vec(std::vector<double> v, double a_max=8, double v_max
 }
 
 
-vector<double> gen_trajectory(vector<double> poly, int len, int dt=0.02)
+vector<double> gen_trajectory(vector<double> poly, int len, double dt=0.02)
 {
   std::vector<double> v;
   for(int i = 1; i <= len; i++)
@@ -286,15 +295,6 @@ vector<double> gen_trajectory(vector<double> poly, int len, int dt=0.02)
 vector<double> JMT(vector< double> start, vector <double> end, double T);
 
 
-template <typename T>
-std::ostream& operator<< (std::ostream& out, const std::vector<T>& v) {
-  if ( !v.empty() ) {
-    out << '[';
-    std::copy (v.begin(), v.end(), std::ostream_iterator<T>(out, ", "));
-    out << "\b\b]";
-  }
-  return out;
-}
 
 int main() {
   uWS::Hub h;
@@ -414,11 +414,13 @@ int main() {
                 pos_x = previous_path_x[path_size-1];
                 pos_y = previous_path_y[path_size-1];
 
-                cout << "previous_path last x,y: " << pos_x << ", " << pos_y << endl;
+                cout << "previous_path last x,y, path_size: " << pos_x << ", " << pos_y << ", " << path_size << endl;
 
+/*
+                assert(path_size >= 3);
                 double pos_x2 = previous_path_x[path_size-2];
                 double pos_y2 = previous_path_y[path_size-2];
-                assert(path_size >= 3);
+
                 double pos_x3 = previous_path_x[path_size-3];
                 double pos_y3 = previous_path_y[path_size-3];
                 angle = atan2(pos_y-pos_y2,pos_x-pos_x2);
@@ -427,7 +429,7 @@ int main() {
                 last_speed = dist/dt;
                 double speed2 = dist2/dt;
                 last_acc = (last_speed - speed2)/dt;
-
+*/
                 double last = s_traj.size()-1;
                 double d1 = s_traj[last] - s_traj[last-1];
                 double d2 = s_traj[last-1] - s_traj[last-2];
@@ -449,49 +451,58 @@ int main() {
             double s = sd[0];
             double d = sd[1];
             //50 mph = 50*1600/3600 = 22
-            double T = 3; //sec
-            double max_acc = 5; //10 is the max allowed by simulator
-            double target_speed = 10;//fmin(10, last_speed+max_acc*T); //m/s
-            double max_path_size = 30;
+            double T = 2; //sec
+            double target_speed = 15;//fmin(10, last_speed+max_acc*T); //m/s
+            double max_path_size = 100;
 
             cout << "speed @ end of path = " << last_speed << endl;
             double min_cost = 0xFFFFFFFF;
             vector<double> best_poly;
             vector<double> best_traj;
-            double s_target = last_s + target_speed*T;
-            for (double dS=-20; dS<0; dS += 10) 
+            vector<double> best_end;
+            for (double dS=-5; dS<5; dS += 1) 
             {
-              for (double dT=-1; dT<1; dT+=1)
+              for (double dT=-0.3; dT<0.3; dT+=0.1)
               {
-                for (double dV=-8; dV<5; dV+=5)
+                for (double dV=-10; dV<=0; dV+=2)
                 {
+                  double s_target = last_s + 1.1*(target_speed + dV)*(T + dT);
                   vector<double> start = {last_s,        last_speed,        last_acc};
                   vector<double> end =   {s_target + dS, target_speed + dV, 0};
                   vector<double> poly = JMT(start, end, T+dT);
-                  vector<double> future_traj = gen_trajectory(poly, max_path_size-path_size);
-                  vector<double> full_traj(s_traj.end() - path_size, s_traj.end());
+                  vector<double> traj = gen_trajectory(poly, max_path_size);
+                  if (s_traj.size() > 3)
+                    //insert few elements from the end of previous path
+                    traj.insert(traj.begin(), s_traj.end() - 3, s_traj.end());
+                  //vector<double> full_traj(s_traj.end() - path_size, s_traj.end());
 
-                  full_traj.insert( full_traj.end(), future_traj.begin(), future_traj.end() );
-                  assert(full_traj.size() == max_path_size);
-                  vector<double> costs = calc_cost_vec(full_traj);
+                  //full_traj.insert( full_traj.end(), future_traj.begin(), future_traj.end() );
+                  //assert(full_traj.size() == max_path_size);
+                  vector<double> costs = calc_cost_vec(traj);
                   //cout << costs << endl;
-                  double cost = costs[0]*costs[2] + costs[1] + costs[2];
-                  cout << full_traj << endl;
-                  cout << costs << endl;
+                  //cout << costs[2] << endl;
+                  double cost = 1000*costs[0] + 1000*costs[1] + costs[2] + 1000*dV*dV;
                   if (cost > 0 && cost < min_cost)
                   {
                     min_cost = cost;
                     best_poly = poly;
-                    cout << "min_cost = " << min_cost << endl;
-                    cout << "costs: " << endl;
-                    cout << costs << endl;
+                    best_traj = traj;
+                    best_end = end;
+                  //cout << "start: " << start << endl;
+                  //cout << "end: " << end << endl;
+                  //cout << "poly: " << poly << endl;
+                    //cout << "min_cost = " << min_cost << endl;
+                    //cout << "costs: " << endl;
+                    //cout << costs << endl;
                   }
 
                 }
               }
             }
 
-            //cout << "poly = " << poly << endl;
+            cout << "best_end: " << best_end << endl;
+            cout << "best_traj: " << best_traj << endl;
+            cout << "best_poly = " << best_poly << endl;
 
             s = polyeval(best_poly, 0);
             //cout << "zero s: " << s << endl;
@@ -499,7 +510,7 @@ int main() {
             {
                 s = polyeval(best_poly, i*dt);
                 d = 6;
-                cout << "s_diff = " << s - last_s << endl;
+                //cout << "s_diff = " << s - last_s << endl;
                 vector<double> xy = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
                 double x_next = xy[0];
                 double y_next = xy[1];
@@ -514,8 +525,8 @@ int main() {
             //guard(next_x_vals);
             //guard(next_y_vals);
 
-            cout << next_x_vals.size() << endl;
-           	print_path(next_x_vals, next_y_vals);
+            cout << "next_x_vals.size(): " << next_x_vals.size() << endl;
+           	//print_path(next_x_vals, next_y_vals);
             /*
             //output path to file:
             ofstream myfile("debug.xls");
