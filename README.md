@@ -85,50 +85,79 @@ A really helpful resource for doing this project and creating smooth trajectorie
     git checkout e94b6e1
     ```
 
-## Editor Settings
+# Model Documentation
+The project is divided into two main modules: trajectory and behavior. The trajectory module is responsible of jenerating smooth trajectory that doesn't violate maximum acceleration, speed and jerk given target speed and target lane. The behavior planning module is responsible to choosing the optimal lane and speed.
 
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
+##Main Pipeline
+The function `onMessage()` in `main.cpp` is called every time a new telemetry arrived from the simulator over the socket interface. The incoming data contains the current car position in cartesian and Frenet coordinates as well as yaw, speed and previous unconsumed path points.  
+There are three main steps in the main pipeline:
+* Calculating the state (position, speed, acceleration) using the last points of the unconsumed path in Frenet coordinates space. This is done in function `calc_eop_state()` that receives the path and time duration between each point and returns a vector describing the state at the end of the path.  
+* Trajectory generation given target lane and speed. This function makes sure to generate trajectory that does not violate constraints and minimizes jerk. This is done by calling the `gnerate_optimal_trajectory()` function.  
+* Behavior planner is responsible to figure out what is the optimal lane and target speed for the next trajectory generation. This is done by calling the function `behavioral_planner()` with sensor fusion data (containing all the cars on the same side of the road) and current state at the end of the path.  
 
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
+##Trajectory Generation
+The trajectory generation related functions are located in the file `trajectory.cpp`. The process begins with the function `gnerate_optimal_trajectory()` that receives a lot of parameters from the `onMessage()` function and returns a trajectory in both Frenet and cartesian coordinates in a custom defined type `trajectory_t`:
+```
+typedef struct _trajectory_t {
+  vector<double> x;
+  vector<double> y;
+  vector<double> s;
+  vector<double> d;
+} trajectory_t;
+```
+The process of generating trajectory can be viewed as divided into three parts:optimal polynomial search, d trajectory and conversion to cartesian.
+###Optimal Polynomial
+The core of this step is the `JMT` function that implements the algorithm from here: http://mplab.ucsd.edu/tutorials/minimumJerk.pdf to find a six degree polynomial that minimizes the jerk. It does not, though, ensures that the trajectory doesn't violate maximum acceleration or speed. Therefore we generate several trajectories varying the target s position and time during which the planning takes place, then we calculate a cost function for each of the trajectories and choose the minimal one. This planning is done only for the s component of the trajectory. 
+###D trajectory
+Fortunately here the distances are much shorter and do not require the search in parameter space that was done for the s component of the trajectory. The `JMT()` function is still used but with the target d position equal to the center of the target lane. The resulting polynomial then represents a valid d trajectory.
+###Conversion to Cartesian
+In this last step the final trajectory is generated for both s and d components using the best polynomial for s and the only one for d. During this process the s,d Frenet coordinates are converted to cartesian using the function `getXY()` from the file `utils.cpp`. Finaly a structure containing all four s,d,x and y coordinate vectors is constructed and returned. For more information about the conversion see separate section below.
 
-## Code Style
+##Behavioral Planner
+This module is located in the file `behave.cpp` and starts execution when the function `behavioral_planner()` is called. This function receives the following input from the caller:
+* Sensor fusion data which is information about other cars on the road.  
+* Lane at the end of path
+* s position of the car at the end of path
+* How much time will pass from current moment to the end of already planned path
+The output is a structure called `plan_t` that contains the optimal lane and speed starting the end of the planned path which is used as an input to the trajectory generation module in the next iteration.
+The planning process itself is done in three stages - finding closest cars, calculating cost, validating feasibility.
+###Closest Cars
+This task is handled by the function `find_closest_cars()` located in the file `behave.cpp`. It receives the same parameters as `behavioral_planner()` function above and returns a stuct containig two vectors:
+```
+typedef struct _closest_cars_t {
+  vector<int>  in_front;  //one car per lane in front 
+  vector<int>  behind;    //one car per lane from behind
+} closest_cars_t;
+```
+each one of the vectors represents the closest car index to the `sensor_fusion` array for each lane. If there are no cars on a specific lane it's value in `in_front` or `behid` arrays will be -1.
+###Cost per Lane
+The cost function contains the following elements:
+* Square of the difference from the maximum speed allowed. This is applied only for the cars in front.
+* Inverse of the square of the distance from the car. This is calculated for both in front and behind cars.
+* Constant value for each lane excepts the lane that the car will be at the end of the path.
+###Validating Feasivility
+In this part we want to make sure that it is indeed feasible to jump to the lane with the miminum cost therefore the target lane is chose only from adjustant lanes to prevent jump over two lanes for example. As soon as the lane is chosen the speed is determined as a ratio of the speed of the leading car in that lane or the maximum speed allowed if there are not cars in front of us on the target lane. Both target lane and the speed are then returned to the caller, which is the fucntion `onMessage()` from `main.cpp`.
 
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
+##Frenet to Cartesian Conversion
+The conversion from Frenet to Cartesian coordinates is done using a sparse map containing the entries that denote the same point in both s,d Frenet coordinates and x,y cartesian coordinates. Since the resolution used by the trajectory generator is much higher than the resolution of the map a smoothing technique was required. Here a minimalistic implementation of spline, fully containted in a single `spline.h` file is being used. When the server is first invoked it calculates three splines in the function `init()` located in the file `utils.cpp`. 
+```
+  sx.set_points(maps_s, maps_x);    
+  sy.set_points(maps_s, maps_y);    
+  sh.set_points(maps_s, maps_h);    
 
-## Project Instructions and Rubric
+```
+Two of the splines map the s coordinate to x and y separetaly and the third maps the direction of the next point to s value. Those three splines are later used in the function `getXY()` to conver from s,d coordinates to x,y as follows:
+```
+double heading = sh(s);
+double perp_heading = heading-pi()/2;
+double x = sx(s) + d*cos(perp_heading);
+double y = sy(s) + d*sin(perp_heading);
+```
 
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
+##Future Work
+Here is a partial list of possible improvements to the algorithm:
+* Add collision detection to the cost function of the behavior planner 
+* Handle s value wraparound due to cyclical nature of the track
+* Prevent lane change threshing by preventing lane change immidieately after another chane was done
+* Implement smarter other cars trajectory prediction algorithm by using Naive Bayes for example
+* Improve run time by using heuristics to limit the search space of the trajetory 
