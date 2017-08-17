@@ -1,7 +1,8 @@
 #include <algorithm>
 #include <cassert>
 #include "cost.h"
-
+#include <vector>
+#include <math.h>
 
 //priority levels for costs
 #define COLLISION   10*1000*1000
