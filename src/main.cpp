@@ -66,11 +66,16 @@ int main() {
   vector<double> map_waypoints_dy;
 
   // Waypoint map to read from
-  string map_file_ = "data/highway_map.csv";
+  vector<string> map_files = {"data/highway_map.csv", "../data/highway_map.csv", "highway_map.csv", "../highway_map.csv"};
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
 
-  ifstream in_map_(map_file_.c_str(), ifstream::in);
+  ifstream in_map_;
+  for (int i=0; i<map_files.size(); i++) { 
+	in_map_.open(map_files[i].c_str(), ifstream::in);
+ 	if (in_map_.is_open())
+		break;
+  } 
   string line;
   while (getline(in_map_, line)) {
   	istringstream iss(line);
