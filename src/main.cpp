@@ -66,7 +66,9 @@ int main() {
   vector<double> map_waypoints_dy;
 
   // Waypoint map to read from
-  vector<string> map_files = {"data/highway_map.csv", "../data/highway_map.csv", "highway_map.csv", "../highway_map.csv"};
+  //vector<string> map_files = {"data/highway_map.csv", "../data/highway_map.csv", "highway_map.csv", "../highway_map.csv"};
+  vector<string> map_files = {"data/highway_map_bosch1.csv", "../data/highway_map_bosch1.csv", "highway_map_bosch1.csv", "../highway_map_bosch1.csv"};
+  //vector<string> map_files = {"data/highway_map_bosch1.csv"};
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
 
@@ -85,10 +87,19 @@ int main() {
   	float d_x;
   	float d_y;
   	iss >> x;
+    iss.ignore(1, ',');
   	iss >> y;
+    iss.ignore(1, ',');
   	iss >> s;
+    iss.ignore(1, ',');
   	iss >> d_x;
+    iss.ignore(1, ',');
   	iss >> d_y;
+    //eliminate duplicates
+    //cout << line << endl;
+    if (find(map_waypoints_s.begin(), map_waypoints_s.end(), s) != map_waypoints_s.end())
+      continue;
+    cout << s << endl;
   	map_waypoints_x.push_back(x);
   	map_waypoints_y.push_back(y);
   	map_waypoints_s.push_back(s);
